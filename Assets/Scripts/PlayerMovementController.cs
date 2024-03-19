@@ -1,51 +1,44 @@
-using System.Collections.Specialized;
-using TMPro;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 public class PlayerMovementController : MonoBehaviour
 {
-    private const float FallMultiplier = 2.0f;
+    private const float GroundCheckRadius = 0.2f;
+
     [SerializeField] private Transform playerCamera;
+    [SerializeField] private LayerMask groundLayerMask;
+    [SerializeField] private Vector3 groundCheckOffset;
+    [SerializeField] private float movementSpeed = 5f;
+    [SerializeField] private float rotationSpeed = 500f;
+
     private Rigidbody playerRb;
     private PlayerController playerController;
+    private CameraController cameraController;
     private Vector2 movementInput = Vector2.zero;
-    private bool jumped;
+    private Quaternion targetRotation;
     private bool canJump;
-    private float distanceToGround = 3f;
-    private float turnSmoothTime = 0.1f;
-    private float turnSmoothVelocity;
-
-    private void Awake()
-    {
-        Physics.gravity *= 2;
-    }
-
-    public void OnMove(InputAction.CallbackContext context)
-    {
-        movementInput = context.ReadValue<Vector2>();
-    }
-
-    public void OnJump(InputAction.CallbackContext context)
-    {
-        jumped = context.action.triggered;
-        Jump();
-    }
-
-    private void Jump()
-    {
-        if (canJump && jumped)
-        {
-            playerRb.AddForce(Vector3.up * playerController.GetPlayerJumpForce(), ForceMode.Impulse);
-            canJump = false;
-        }
-    }
 
     private void Start()
     {
         playerController = GetComponent<PlayerController>();
         playerRb = GetComponent<Rigidbody>();
+        cameraController = Camera.main.GetComponent<CameraController>();
+    }
+
+    //Callback for new Controller Input System
+    public void OnMove(InputAction.CallbackContext context)
+    {
+        movementInput = context.ReadValue<Vector2>();
+    }
+
+    //Callback for new Controller Input System
+    public void OnJump(InputAction.CallbackContext context)
+    {
+        if (!canJump)
+            return;
+
+        playerRb.AddForce(Vector3.up * playerController.GetPlayerJumpForce(), ForceMode.Impulse);
+        canJump = false;
     }
 
     private void FixedUpdate()
@@ -56,27 +49,30 @@ public class PlayerMovementController : MonoBehaviour
 
     private void MovePlayer()
     {
-        Vector3 direction = new Vector3(movementInput.x, 0, movementInput.y).normalized;
+        Vector3 moveInput = new Vector3(movementInput.x, 0, movementInput.y).normalized;
 
-        if (direction.magnitude >= 0.1f)
+        Vector3 moveDirection = GetDirectionOfMovingBasedOnCamera(moveInput);
+
+        ChangeDirectionIfCharacterIsMoving(moveDirection);
+    }
+
+    private Vector3 GetDirectionOfMovingBasedOnCamera(Vector3 moveInput) => cameraController.PlanarRotation() * moveInput;
+
+    private void ChangeDirectionIfCharacterIsMoving(Vector3 moveDirection)
+    {
+        float moveAmount = Mathf.Clamp01(Mathf.Abs(movementInput.x) + Mathf.Abs(movementInput.y));
+
+        if (moveAmount > 0)
         {
-            float targetAngle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg + playerCamera.eulerAngles.y;
-            float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
-
-            transform.rotation = Quaternion.Euler(0, angle, 0);
-
-            Vector3 moveDir = Quaternion.Euler(0, targetAngle, 0) * Vector3.forward;
-
-            transform.Translate(playerController.GetPlayerSpeed() * Time.deltaTime * moveDir.normalized, Space.World);
+            transform.position += Time.deltaTime * movementSpeed * moveDirection;
+            targetRotation = Quaternion.LookRotation(moveDirection);
         }
+
+        transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
     }
 
     private void GroundCheck()
     {
-        if (Physics.Raycast(transform.position, Vector3.down, distanceToGround + 0.1f))
-            canJump = true;
-
-        else
-            canJump = false;
+        canJump = Physics.CheckSphere(transform.TransformPoint(groundCheckOffset), GroundCheckRadius, groundLayerMask);
     }
 }
